@@ -1,0 +1,3 @@
+[submodule "transmission_line_synthesis/fice"]
+	path = transmission_line_synthesis/fice
+	url = git@github.com:forrestv/fice.git
