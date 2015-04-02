@@ -12,9 +12,36 @@ class SynthWindow(MyWindow):
         
    
     def makeLeftPane(self):
-        #optionsSpecs = [varTitles, varDTypes, varDefaults, varTexts, varVals]
+        varTitles = ['Function Type', 'Waveform Piecewise Type']
+        varDTypes = [IntVar, IntVar]
+        varDefaults = [0,2]
+        varTexts = [['Arbitrary Function', 'Piecewise Waveform'], ['No Adjust', 'Smooth Connection', 'Origin Reset', 't Reset']]
+        varVals = [[0,1],[1,2,3,4]]
         
-        self._makeLeftPane([])#optionsSpecs)
+        optionsSpecs = [varTitles, varDTypes, varDefaults, varTexts, varVals]
+        
+        self._makeLeftPane(optionsSpecs)#optionsSpecs)
+        
+        self.funcType = self.options[0]
+        self.piecewiseType = self.options[1]
+
+        
+        
+        self.points = StringVar()
+        self.funcs = StringVar()
+        self.points.set('[.2]')
+        self.funcs.set('[2*t,cos(2*pi/.8*t)]')
+        
+        Label(self.leftPane, text='Piecewise Function').pack(fill=X, pady=(15,0), padx=5)
+        funcFrame = Frame(self.leftPane)
+        funcFrame.pack(fill=BOTH, padx=5, pady=(0,15))
+       
+        Button(funcFrame, text='Enter Points:', command=self.updatePlots).grid(row=1,column=1,sticky=W,padx=(5,0))
+        Entry(funcFrame, textvariable=self.points).grid(row=1,column=2,sticky=E,padx=(0,5))
+        Button(funcFrame, text='Enter Functions:', command=self.updatePlots).grid(row=2,column=1,sticky=W,padx=(5,0))
+        Entry(funcFrame, textvariable=self.funcs).grid(row=2,column=2,sticky=E,padx=(0,5))
+        
+        
         
         # variable for holding the function
         self.customFunc = StringVar()
@@ -31,15 +58,6 @@ class SynthWindow(MyWindow):
         Entry(funcFrame, textvariable=self.customFunc).grid(row=1,column=2,sticky=E,padx=(0,5))
         # button to play sound
         Button(funcFrame, text='Play Sound', command=self.play).grid(row=2,columnspan=2,column=1,padx=5)
-    
-    def play(self):
-        ar = np.array(self.func)                                # make a copy
-        ar /= max(abs(ar))                                       # normalize to 1
-        ar *= 2**14                                                 # normalize to 15 bits. 16 was making my speakers crackle
-        ar = ar.astype(np.int16)
-        
-        sound = pygame.sndarray.make_sound(ar)   # create sound
-        sound.play()                                                # play it
         
     
     ############################################################################  
@@ -70,11 +88,55 @@ class SynthWindow(MyWindow):
         for axis in axes:
             l,=axis.plot(dummy)
             lines.append(l)
+        
+        l, = axes[0].plot(dummy)
+        lines.append(l)
 
         self.lines = lines
     
         self.freqsUsed = range(10)
     
+    def piecewise(self, var, points, funcs, type=1):
+        res = np.array([])
+        points.insert(0,var[0])
+        points.append(var[-1])
+        origin = [0,0]
+        
+        origfuncs = list(funcs)
+        for i in range(len(funcs)):
+            if type == 1:
+                funcs[i] = lambda x: origfuncs[i](x) + x*0
+            elif type == 2:
+                funcs[i] = lambda x, o=origin: origfuncs[i](x-o[0]) - origfuncs[i](0) + o[1] + x*0
+            elif type == 3:
+                funcs[i] = lambda x, o=origin: origfuncs[i](x-o[0]) + o[1] + x*0
+            elif type == 4:
+                funcs[i] = lambda x, o=origin: origfuncs[i](x-o[0]) + x*0
+            f = funcs[i]
+            origin = [points[i+1], f(points[i+1])]
+            
+            if i+1 < len(funcs):
+                leg = var[np.where((var>=points[i]) & (var<points[i+1]))]
+            else:
+                leg = var[np.where((var>=points[i]) & (var<=points[i+1]))]
+            res = np.append(res, f(leg))
+        return res
+    
+    def functionize(self, funcs):
+        funcs = funcs[1:-1].split(',')
+        return map(lambda s: lambda x: eval(s,np.__dict__,{'t' : x}), funcs)
+        
+    
+    def play(self):
+        ar = np.array(self.func)                                # make a copy
+        ar /= max(abs(ar))                                       # normalize to 1
+        ar *= 2**14                                                 # normalize to 15 bits. 16 was making my speakers crackle
+        ar = ar.astype(np.int16)
+        
+        sound = pygame.sndarray.make_sound(ar)   # create sound
+        sound.play()                                                # play it
+        
+        
     ############################################################################  
     # Updates the plots when anything is changed
     #
@@ -85,16 +147,29 @@ class SynthWindow(MyWindow):
         oldFreqs = self.freqsUsed                                                  # show sliders if used, hide unused sliders
         newFreqs = []
         for i in range(10):
-            if 'f%i'%i in self.customFunc.get(): newFreqs.append(i)
+            if (self.funcType.get() == 0 and 'f%i'%i in self.customFunc.get()) or\
+                (self.funcType.get() == 1 and i == 0): 
+               newFreqs.append(i)
+
         self.hideShowFreqs(oldFreqs, newFreqs)
         self.freqsUsed = newFreqs
         
-        t = np.arange(0,0.5,1./self.sampleRate)                             # 0.5 seconds of sound
+        t = np.arange(0,1.0,1./self.sampleRate)                             # 0.5 seconds of sound
         
-        localDict = {'f%i'%i : f[i] for i in range(10)}                       # possible variables the input function can access
-        localDict['t'] = t
-        func = eval(self.customFunc.get(),np.__dict__,localDict)      # evaluate the function using numpy functions if needed
+        if self.funcType.get() == 0:
+            localDict = {'f%i'%i : f[i] for i in range(10)}                       # possible variables the input function can access
+            localDict['t'] = t
+            func = eval(self.customFunc.get(),np.__dict__,localDict)      # evaluate the function using numpy functions if needed
+            
+            self.lines[-1].set_data([0],[0])
+        elif self.funcType.get() == 1:
+            waveform = self.piecewise(t, eval(self.points.get()), self.functionize(self.funcs.get()), self.piecewiseType.get())
+            N = len(waveform)
+            func = waveform[map(lambda x: int(f[0])*x % N, range(N))]
+            
+            self.lines[-1].set_data(t,waveform)
         self.func = func
+            
         N = len(func)                                                                    # number of samples
         
         self.lines[0].set_data(t,func)                                              # plot new data
