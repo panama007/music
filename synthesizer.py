@@ -1,4 +1,5 @@
 import pygame
+import scipy.signal
 from MyWindow import *
 
 class SynthWindow(MyWindow):
@@ -27,19 +28,35 @@ class SynthWindow(MyWindow):
 
         
         
-        self.points = StringVar()
-        self.funcs = StringVar()
-        self.points.set('[.2]')
-        self.funcs.set('[2*t,cos(2*pi/.8*t)]')
+        self.waveformPoints = StringVar()
+        self.waveformFuncs = StringVar()
+        self.waveformPoints.set('[.5]')
+        self.waveformFuncs.set('[t**t,-t**t]')
         
-        Label(self.leftPane, text='Piecewise Function').pack(fill=X, pady=(15,0), padx=5)
+        Label(self.leftPane, text='Piecewise Function for Waveform').pack(fill=X, pady=(15,0), padx=5)
         funcFrame = Frame(self.leftPane)
         funcFrame.pack(fill=BOTH, padx=5, pady=(0,15))
        
         Button(funcFrame, text='Enter Points:', command=self.updatePlots).grid(row=1,column=1,sticky=W,padx=(5,0))
-        Entry(funcFrame, textvariable=self.points).grid(row=1,column=2,sticky=E,padx=(0,5))
+        Entry(funcFrame, textvariable=self.waveformPoints).grid(row=1,column=2,sticky=E,padx=(0,5))
         Button(funcFrame, text='Enter Functions:', command=self.updatePlots).grid(row=2,column=1,sticky=W,padx=(5,0))
-        Entry(funcFrame, textvariable=self.funcs).grid(row=2,column=2,sticky=E,padx=(0,5))
+        Entry(funcFrame, textvariable=self.waveformFuncs).grid(row=2,column=2,sticky=E,padx=(0,5))
+        
+        
+        
+        self.envelopePoints = StringVar()
+        self.envelopeFuncs = StringVar()
+        self.envelopePoints.set('[.05]')
+        self.envelopeFuncs.set('[20*t,exp(-4*t)]')
+        
+        Label(self.leftPane, text='Piecewise Function for Envelope').pack(fill=X, pady=(15,0), padx=5)
+        funcFrame = Frame(self.leftPane)
+        funcFrame.pack(fill=BOTH, padx=5, pady=(0,15))
+       
+        Button(funcFrame, text='Enter Points:', command=self.updatePlots).grid(row=1,column=1,sticky=W,padx=(5,0))
+        Entry(funcFrame, textvariable=self.envelopePoints).grid(row=1,column=2,sticky=E,padx=(0,5))
+        Button(funcFrame, text='Enter Functions:', command=self.updatePlots).grid(row=2,column=1,sticky=W,padx=(5,0))
+        Entry(funcFrame, textvariable=self.envelopeFuncs).grid(row=2,column=2,sticky=E,padx=(0,5))
         
         
         
@@ -89,6 +106,8 @@ class SynthWindow(MyWindow):
             l,=axis.plot(dummy)
             lines.append(l)
         
+        l, = axes[0].plot(dummy)
+        lines.append(l)
         l, = axes[0].plot(dummy)
         lines.append(l)
 
@@ -162,24 +181,37 @@ class SynthWindow(MyWindow):
             func = eval(self.customFunc.get(),np.__dict__,localDict)      # evaluate the function using numpy functions if needed
             
             self.lines[-1].set_data([0],[0])
+            self.lines[-2].set_data([0],[0])
         elif self.funcType.get() == 1:
-            waveform = self.piecewise(t, eval(self.points.get()), self.functionize(self.funcs.get()), self.piecewiseType.get())
+            waveform = self.piecewise(t, eval(self.waveformPoints.get()), self.functionize(self.waveformFuncs.get()), self.piecewiseType.get())
+            envelope = self.piecewise(t, eval(self.envelopePoints.get()), self.functionize(self.envelopeFuncs.get()), 2)
+            
+            waveform -= sum(waveform)/len(waveform)
+            
             N = len(waveform)
             func = waveform[map(lambda x: int(f[0])*x % N, range(N))]
+            func *= envelope
+            
+            waveform /= max(np.abs(waveform))
+            envelope /= max(np.abs(envelope))
             
             self.lines[-1].set_data(t,waveform)
+            self.lines[-2].set_data(t,envelope)
+        func /= max(np.abs(func))
         self.func = func
             
         N = len(func)                                                                    # number of samples
         
+        if self.funcType.get() == 0: title = self.customFunc.get()
+        else: title = "Red = waveform, Green = envelope, Blue = sound"
+        
         self.lines[0].set_data(t,func)                                              # plot new data
-        self.formatAxes(self.axes[0],t,func,'Time (s)', 'Amplitude',self.customFunc.get()) # format the axes
+        self.formatAxes(self.axes[0],t,scipy.signal.square(2*np.pi*t),'Time (s)', 'Amplitude',title) # format the axes
         
         F = np.abs(np.fft.fft(func))[:N/2]                                         # compute the FFT
         w = np.arange(0.,N/2)*self.sampleRate/float(N)                  # frequencies used in FFT
         self.lines[1].set_data(w,F)                                                  # plot the FFT
         self.formatAxes(self.axes[1],w[:N/10],F[:N/10],'Frequency (Hz)', 'Amplitude', 'FFT of Signal') # formate the axes
-        
         
         for axis in self.axes:                                                          # allow plots to update
             axis.get_figure().canvas.draw_idle()
